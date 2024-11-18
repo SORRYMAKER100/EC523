@@ -14,7 +14,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from model import *
 from tensorboardX import SummaryWriter
 
-## setup parse
+# setup parser
 parser = argparse.ArgumentParser(description='Train the network',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--mode', default='train', choices=['train', 'debug'], dest='mode')
@@ -46,12 +46,12 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
     args.device = torch.device(0)
 
-    if args.computer=='local':
-        # change index(starts at 1)
+    if args.computer == 'local':
+        # Change index (starts at 1)
         args.dir_data = 'T:/simulation beads/2d/debug/'
-    elif args.computer=='scc':
+    elif args.computer == 'scc':
         args.dir_data = '/net/engnas/Research/eng_research_cisl/yqw/simulation_beads/2d/lsv_2d_beads_v17'
-    #make dir
+    # Create directories
     dir_result_val = args.dir_save + '/val/'
     dir_result_train = args.dir_save + '/train/'
     if not os.path.exists(os.path.join(dir_result_train)):
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     if not os.path.exists(os.path.join(dir_result_val)):
         os.makedirs(os.path.join(dir_result_val))
 
-    # training data
+    # Load training data
     if args.network == 'cm2net':
         # Create the complete dataset
         transform_train = transforms.Compose([ToTensorcm2()])
@@ -73,51 +73,50 @@ if __name__ == '__main__':
         transform_train = transforms.Compose([Noise(), Resize(), ToTensor()])
         whole_set = MyDataset(args.dir_data, transform=transform_train)
         length = len(whole_set)
-        train_size, validate_size = int(args.train_ratio*length), length-int(args.train_ratio*length)
+        train_size, validate_size = int(args.train_ratio * length), length - int(args.train_ratio * length)
         train_set, validate_set = torch.utils.data.random_split(whole_set, [train_size, validate_size])
-        print('training images:', len(train_set),
-            'testing images:', len(validate_set))
+        print('Training images:', len(train_set),
+              'Testing images:', len(validate_set))
 
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, num_workers=8, shuffle=True, drop_last=False)
     val_loader = torch.utils.data.DataLoader(validate_set, batch_size=1, num_workers=8, shuffle=False, drop_last=False)
 
-    num=len(args.num_gpu)
+    num = len(args.num_gpu)
     num_batch_train = int((train_size * 81 / (args.batch_size * num)) + ((train_size * 81 % (args.batch_size * num)) != 0))
     num_batch_val = int((validate_size / args.batch_size) + ((validate_size % args.batch_size) != 0))
 
-    ## setup network TBD!
+    # Setup the network TBD!
     if args.network == 'multiwiener':
         psfs = skimage.io.imread(args.dir_data + '/psf_v11.tif')
         psfs = np.array(psfs)
         psfs = psfs.astype('float32') / psfs.max()
-        psfs = psfs[:,57 * 2:3000, 94 * 2 + 156:4000 - 156]
-        psfs = np.pad(psfs, ((0,0),(657, 657), (350, 350)))
-        Ks = args.ks*np.ones((args.num_psf, 1, 1))
-        deconvolution= MultiWienerDeconvolution2D(psfs,Ks).to(args.device)
+        psfs = psfs[:, 57 * 2:3000, 94 * 2 + 156:4000 - 156]
+        psfs = np.pad(psfs, ((0, 0), (657, 657), (350, 350)))
+        Ks = args.ks * np.ones((args.num_psf, 1, 1))
+        deconvolution = MultiWienerDeconvolution2D(psfs, Ks).to(args.device)
         enhancement = RCAN(args.num_psf).to(args.device)
         model = LSVEnsemble2d(deconvolution, enhancement)
 
     if args.network == 'svfourier':
-        deconvolution = FourierDeconvolution2D_ds(args.num_psf,args.ps).to(args.device)
+        deconvolution = FourierDeconvolution2D_ds(args.num_psf, args.ps).to(args.device)
         enhancement = RCAN(args.num_psf).to(args.device)
         model = LSVEnsemble2d(deconvolution, enhancement)
 
     if args.network == 'cm2net':
         model = FPNet().to(args.device)
 
-    #multiple gpu
+    # Use multiple GPUs
     model = model.to(args.device)
 
-    ## setup loss & optimization
+    # Setup loss & optimization
     ssim_loss = MS_SSIM(data_range=1, size_average=True, channel=1)
     l2_loss = nn.MSELoss()
     bce_loss = nn.BCELoss()
     params = model.parameters()
     optimizer = torch.optim.Adam(params, lr=args.lr)
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, 50, eta_min = 1e-6)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, 50, eta_min=1e-6)
 
-
-    ## load from checkpoints
+    # Load from checkpoints
     st_epoch = 0
 
     # Logger
@@ -142,37 +141,36 @@ if __name__ == '__main__':
             st_epoch = 10
             losslogger = checkpoint['losslogger']
             best_ssim = checkpoint.get('best_ssim', 0)
-            print(f"从第 {st_epoch} 轮继续训练")
+            print(f"Continuing training from epoch {st_epoch}")
         else:
-            print(f"未找到检查点 '{checkpoint_path}'，从头开始训练。")
+            print(f"Checkpoint '{checkpoint_path}' not found, starting training from scratch.")
 
-    #save best model
+    # Save the best model
     best_ssim = 0
     trigger = 0
-    best_loss=10e7
+    best_loss = 10e7
 
-    ## setup tensorboard
-    #set up tensorboard
-    dir_log= args.dir_log
+    # Setup tensorboard
+    dir_log = args.dir_log
     if not os.path.exists(os.path.join(dir_log)):
         os.makedirs(os.path.join(dir_log))
     writer = SummaryWriter(log_dir=dir_log)
 
     for epoch in range(st_epoch + 1, args.num_epoch + 1):
-        ## training phase
+        # Training phase
         model.train()
         loss_train = []
         ssim_train = []
         psnr_train = []
         for batch, data in enumerate(train_loader, 1):
 
-            # gt shape [Batch,H,W], Output [Batch,1,H,W]
+            # Ground truth shape [Batch, H, W], Output [Batch, 1, H, W]
             if args.network == 'cm2net':
                 gt = data['gt'].to(args.device)
                 demix = data['meas'].unsqueeze(1).to(args.device)
                 index_list = data['index'].to(args.device)
                 optimizer.zero_grad()
-                output = model(demix,index_list)
+                output = model(demix, index_list)
                 loss_recon = bce_loss(torch.squeeze(output, 1), gt) + l2_loss(torch.squeeze(output, 1), gt)
                 loss = loss_recon
             else:
@@ -184,14 +182,14 @@ if __name__ == '__main__':
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            output_n = (output - output.view(output.size(0), -1).min(1)[0].view(-1,1,1,1)) / \
-           (output.view(output.size(0), -1).max(1)[0].view(-1,1,1,1) - output.view(output.size(0), -1).min(1)[0].view(-1,1,1,1) + 1e-8)
-            gt_n = (gt.unsqueeze(1) - gt.view(gt.size(0), -1).min(1)[0].view(-1,1,1,1)) / \
-       (gt.view(gt.size(0), -1).max(1)[0].view(-1,1,1,1) - gt.view(gt.size(0), -1).min(1)[0].view(-1,1,1,1) + 1e-8)
+            output_n = (output - output.view(output.size(0), -1).min(1)[0].view(-1, 1, 1, 1)) / \
+                       (output.view(output.size(0), -1).max(1)[0].view(-1, 1, 1, 1) - output.view(output.size(0), -1).min(1)[0].view(-1, 1, 1, 1) + 1e-8)
+            gt_n = (gt.unsqueeze(1) - gt.view(gt.size(0), -1).min(1)[0].view(-1, 1, 1, 1)) / \
+                   (gt.view(gt.size(0), -1).max(1)[0].view(-1, 1, 1, 1) - gt.view(gt.size(0), -1).min(1)[0].view(-1, 1, 1, 1) + 1e-8)
 
             ssim = ssim_loss(output_n, gt_n)
             psnr = 20 * torch.log10(torch.max(output) / sqrt(l2_loss(torch.squeeze(output, 1), gt)))
-            # get losses
+            # Get losses
             loss_train += [loss.item()]
             ssim_train += [ssim.item()]
             psnr_train += [psnr.item()]
@@ -204,15 +202,15 @@ if __name__ == '__main__':
 
         if args.local_rank == 0 and (epoch % args.num_freq_save) == 0:
             gt = gt.data.cpu().numpy()
-            x_recon = torch.squeeze(output,1).data.cpu().numpy()
+            x_recon = torch.squeeze(output, 1).data.cpu().numpy()
             for j in range(gt.shape[0]):
-                im_gt = (np.clip(gt[j, ...]/ np.max(gt[j, ...]), 0, 1) * 255).astype(np.uint8)
+                im_gt = (np.clip(gt[j, ...] / np.max(gt[j, ...]), 0, 1) * 255).astype(np.uint8)
                 im_recon = (np.clip(x_recon[j, ...] / np.max(x_recon[j, ...]), 0, 1) * 255).astype(np.uint8)
-                tifffile.imwrite((dir_result_train + str(epoch) + '_recon'  + '.tif'),im_recon.squeeze())
-                tifffile.imwrite((dir_result_train + str(epoch) + '_gt' +  '.tif'),im_gt.squeeze())
+                tifffile.imwrite((dir_result_train + str(epoch) + '_recon' + '.tif'), im_recon.squeeze())
+                tifffile.imwrite((dir_result_train + str(epoch) + '_gt' + '.tif'), im_gt.squeeze())
 
-        ## validation phase
-        print('val')
+        # Validation phase
+        print('Validation')
         with torch.no_grad():
             model.eval()
             loss_val = []
@@ -220,28 +218,27 @@ if __name__ == '__main__':
             psnr_val = []
 
             for batch, data in enumerate(val_loader, 1):
-                # forward simulation(add noise)
+                # Forward simulation (add noise)
                 if args.network == 'cm2net':
                     gt = data['gt'].to(args.device)
                     demix = data['meas'].unsqueeze(1).to(args.device)
                     index_list = data['index'].to(args.device)
-                    output = model(demix,index_list)
-                    # print(demix_output.shape,demix.shape)
+                    output = model(demix, index_list)
                     loss_recon = bce_loss(torch.squeeze(output, 1), gt) + l2_loss(torch.squeeze(output, 1), gt)
                     loss = loss_recon
                 else:
                     meas = data['meas'].to(args.device)
                     gt = data['gt'].to(args.device)
                     output = model(meas)
-                    loss = bce_loss(torch.squeeze(output, 1), gt)+l2_loss(torch.squeeze(output, 1), gt)
-                output_n = (output - output.view(output.size(0), -1).min(1)[0].view(-1,1,1,1)) / \
-           (output.view(output.size(0), -1).max(1)[0].view(-1,1,1,1) - output.view(output.size(0), -1).min(1)[0].view(-1,1,1,1) + 1e-8)
-                gt_n = (gt.unsqueeze(1) - gt.view(gt.size(0), -1).min(1)[0].view(-1,1,1,1)) / \
-       (gt.view(gt.size(0), -1).max(1)[0].view(-1,1,1,1) - gt.view(gt.size(0), -1).min(1)[0].view(-1,1,1,1) + 1e-8)
+                    loss = bce_loss(torch.squeeze(output, 1), gt) + l2_loss(torch.squeeze(output, 1), gt)
+                output_n = (output - output.view(output.size(0), -1).min(1)[0].view(-1, 1, 1, 1)) / \
+                           (output.view(output.size(0), -1).max(1)[0].view(-1, 1, 1, 1) - output.view(output.size(0), -1).min(1)[0].view(-1, 1, 1, 1) + 1e-8)
+                gt_n = (gt.unsqueeze(1) - gt.view(gt.size(0), -1).min(1)[0].view(-1, 1, 1, 1)) / \
+                       (gt.view(gt.size(0), -1).max(1)[0].view(-1, 1, 1, 1) - gt.view(gt.size(0), -1).min(1)[0].view(-1, 1, 1, 1) + 1e-8)
 
                 ssim = ssim_loss(output_n, gt_n)
                 psnr = 20 * torch.log10(torch.max(output) / sqrt(l2_loss(torch.squeeze(output, 1), gt)))
-                # get losses
+                # Get losses
                 loss_val += [loss.item()]
                 ssim_val += [ssim.item()]
                 psnr_val += [psnr.item()]
@@ -276,7 +273,7 @@ if __name__ == '__main__':
                     tifffile.imwrite((dir_result_val + str(epoch) + '_psf_mip' + '.tif'), psf_mip, photometric='minisblack')
 
         if args.local_rank == 0:
-            # set in logs
+            # Log the results
             df = pd.DataFrame()
             df['loss_train'] = pd.Series(np.mean(loss_train))
             df['ssim_train'] = pd.Series(np.mean(ssim_train))
@@ -294,17 +291,16 @@ if __name__ == '__main__':
 
         trigger += 1
         if args.local_rank == 0 and (np.mean(ssim_val) > best_ssim):
-            save(args.dir_chck+ '/best_model/', model, optimizer, epoch, losslogger)
+            save(args.dir_chck + '/best_model/', model, optimizer, epoch, losslogger)
             best_ssim = np.mean(ssim_val)
-            print("=>saved best model")
+            print("=> Saved best model")
             trigger = 0
 
         if not args.early_stop is not None and args.local_rank == 0:
             if trigger >= args.early_stop:
-                print("=> early stop")
+                print("=> Early stopping")
             break
 
-        # save checkpoint
+        # Save checkpoint
         if args.local_rank == 0 and (epoch % args.num_freq_save) == 0:
-            save(args.dir_chck, model, optimizer,epoch,losslogger)
-
+            save(args.dir_chck, model, optimizer, epoch, losslogger)
