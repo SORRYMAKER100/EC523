@@ -26,8 +26,6 @@ class CM2Dataset(data.Dataset):
         # Load the full image stack
         meas_stack = skimage.io.imread(self.dir_data + f'/demix_{index + 1}.tif')
         meas_stack = meas_stack.astype('float32') / meas_stack.max()
-        meas = meas_stack[4]  # Select channel
-
         # Load the ground truth image
         gt = skimage.io.imread(self.dir_data + f'/gt_{index + 1}.tif')
         gt = gt.astype('float32') / gt.max()
