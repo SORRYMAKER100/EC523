@@ -42,7 +42,7 @@ class CM2Dataset(data.Dataset):
             meas = meas_stack.transpose(1, 2, 0)  # [H, W, 9]
         else:
             raise ValueError(The shape of meas_stack in file {index * 3 + 1} does not match the expected shape: {meas_stack.shape})
-
+        meas = meas_stack[4]  # Select channel
         gt_path = f'{self.dir_data}/gt_{index * 3 + 1}.tif'
         gt = skimage.io.imread(gt_path)
         gt = gt.astype('float32') / gt.max()
