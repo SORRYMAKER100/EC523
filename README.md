@@ -29,9 +29,3 @@ We will evaluate the model's performance using three configurations:
 
 We will compare these configurations using MSE and SSIM metrics to assess deblurring accuracy and computational efficiency.
 
-## References
-1. Patch-based image restoration methods.
-2. Studies on CNN limitations with non-uniform deconvolution.
-3. Context-aware techniques for image reconstruction.
-4. NAFNet: A lightweight and efficient model for image restoration.
-
