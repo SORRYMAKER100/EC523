@@ -226,7 +226,6 @@ class FPNet(nn.Module):
         output = self.activation(output)
         return output  # Output shape: [batch_size, 1, height, width]
 
-# 使用的下采样函数
 def indexDown(index_list):
     index_list = index_list.permute(0, 3, 1, 2)
     output = F.avg_pool2d(index_list, kernel_size=2, stride=2)
